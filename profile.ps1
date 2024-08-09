@@ -11,9 +11,59 @@
 
 # Authenticate with Azure PowerShell using MSI.
 # Remove this if you are not planning on using MSI or Azure PowerShell.
-import-module .\GraphHelper.psm1
 
+# Import modules
+@('CippCore', 'CippExtensions', 'Az.KeyVault', 'Az.Accounts') | ForEach-Object {
+    try {
+        $Module = $_
+        Import-Module -Name $_ -ErrorAction Stop
+    } catch {
+        Write-LogMessage -message "Failed to import module - $Module" -LogData (Get-CippException -Exception $_) -Sev 'debug'
+        $_.Exception.Message
+    }
+}
 
+if ($env:ExternalDurablePowerShellSDK -eq $true) {
+    try {
+        Import-Module AzureFunctions.PowerShell.Durable.SDK -ErrorAction Stop
+        Write-Host 'External Durable SDK enabled'
+    } catch {
+        Write-LogMessage -message 'Failed to import module - AzureFunctions.PowerShell.Durable.SDK' -LogData (Get-CippException -Exception $_) -Sev 'debug'
+        $_.Exception.Message
+    }
+}
+
+try {
+    Disable-AzContextAutosave -Scope Process | Out-Null
+} catch {}
+
+try {
+    if (!$ENV:SetFromProfile) {
+        Write-Host "We're reloading from KV"
+        $Auth = Get-CIPPAuthentication
+    }
+} catch {
+    Write-LogMessage -message 'Could not retrieve keys from Keyvault' -LogData (Get-CippException -Exception $_) -Sev 'debug'
+}
+
+Set-Location -Path $PSScriptRoot
+$CurrentVersion = (Get-Content .\version_latest.txt).trim()
+$Table = Get-CippTable -tablename 'Version'
+$LastStartup = Get-CIPPAzDataTableEntity @Table -Filter "PartitionKey eq 'Version' and RowKey eq 'Version'"
+if ($CurrentVersion -ne $LastStartup.Version) {
+    Write-Host "Version has changed from $($LastStartup.Version) to $CurrentVersion"
+    Clear-CippDurables
+    if ($LastStartup) {
+        $LastStartup.Version = $CurrentVersion
+    } else {
+        $LastStartup = [PSCustomObject]@{
+            PartitionKey = 'Version'
+            RowKey       = 'Version'
+            Version      = $CurrentVersion
+        }
+    }
+    Update-AzDataTableEntity @Table -Entity $LastStartup
+}
 # Uncomment the next line to enable legacy AzureRm alias in Azure PowerShell.
 # Enable-AzureRmAlias
 
