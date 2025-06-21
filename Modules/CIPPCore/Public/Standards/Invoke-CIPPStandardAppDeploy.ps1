@@ -14,7 +14,9 @@ function Invoke-CIPPStandardAppDeploy {
             Entra (AAD) Standards
         TAG
         ADDEDCOMPONENT
-            {"type":"textField","name":"standards.AppDeploy.appids","label":"Application IDs, comma separated"}
+            {"type":"select","multiple":false,"creatable":false,"label":"App Approval Mode","name":"standards.AppDeploy.mode","options":[{"label":"Template","value":"template"},{"label":"Copy Permissions","value":"copy"}]}
+            {"type":"autoComplete","multiple":true,"creatable":false,"label":"Select Applications","name":"standards.AppDeploy.templateIds","api":{"url":"/api/ListAppApprovalTemplates","labelField":"TemplateName","valueField":"TemplateId","queryKey":"StdAppApprovalTemplateList","addedField":{"AppId":"AppId"}},"condition":{"field":"standards.AppDeploy.mode","compareType":"is","compareValue":"template"}}
+            {"type":"textField","name":"standards.AppDeploy.appids","label":"Application IDs, comma separated","condition":{"field":"standards.AppDeploy.mode","compareType":"isNot","compareValue":"template"}}
         IMPACT
             Low Impact
         ADDEDDATE
@@ -25,7 +27,7 @@ function Invoke-CIPPStandardAppDeploy {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/entra-aad-standards#low-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
@@ -67,15 +69,15 @@ function Invoke-CIPPStandardAppDeploy {
 
             foreach ($AppId in $AppIds) {
                 if ($AppId -notin $AppExists.appId) {
-                    Write-Information "Adding $($AppId) to tenant $($Tenant)."
-                    $PostResults = New-GraphPostRequest 'https://graph.microsoft.com/beta/servicePrincipals' -type POST -tenantid $Item.tenant -body "{ `"appId`": `"$($Item.appId)`" }"
-                    Write-LogMessage -message "Added $($Item.AppId) to tenant $($Item.Tenant)" -tenant $Item.Tenant -API 'Add Multitenant App' -sev Info
+                    Write-Information "Adding $AppId to tenant $Tenant."
+                    $PostResults = New-GraphPostRequest 'https://graph.microsoft.com/beta/servicePrincipals' -type POST -tenantid $Tenant -body "{ `"appId`": `"$AppId`" }"
+                    Write-LogMessage -message "Added $AppId to tenant $Tenant" -tenant $Tenant -API 'Add Multitenant App' -sev Info
                 }
             }
             foreach ($TemplateId in $TemplateIds) {
                 try {
-                    Add-CIPPApplicationPermission -TemplateId $TemplateId -Tenantfilter $Tenant
-                    Add-CIPPDelegatedPermission -TemplateId $TemplateId -Tenantfilter $Tenant
+                    Add-CIPPApplicationPermission -TemplateId $TemplateId -TenantFilter $Tenant
+                    Add-CIPPDelegatedPermission -TemplateId $TemplateId -TenantFilter $Tenant
                     Write-LogMessage -API 'Standards' -tenant $tenant -message "Added application(s) from template $($TemplateName) and updated it's permissions" -sev Info
                 } catch {
                     $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message

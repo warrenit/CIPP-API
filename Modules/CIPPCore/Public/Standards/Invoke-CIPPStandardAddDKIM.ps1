@@ -27,7 +27,7 @@ function Invoke-CIPPStandardAddDKIM {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/exchange-standards#low-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
@@ -76,6 +76,8 @@ function Invoke-CIPPStandardAddDKIM {
         '*.signature365.net'
         '*.myteamsconnect.io'
         '*.teams.dstny.com'
+        '*.msteams.8x8.com'
+        '*.ucconnect.co.uk'
     )
 
     $AllDomains = ($BatchResults | Where-Object { $_.DomainName }).DomainName | ForEach-Object {
