@@ -30,8 +30,14 @@ function Invoke-CIPPStandardTeamsMeetingRecordingExpiration {
     ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'TeamsMeetingRecordingExpiration'
 
     param($Tenant, $Settings)
+    $TestResult = Test-CIPPStandardLicense -StandardName 'TeamsMeetingRecordingExpiration' -TenantFilter $Tenant -RequiredCapabilities @('MCOSTANDARD', 'MCOEV', 'MCOIMP', 'TEAMS1','Teams_Room_Standard')
 
     # Input validation
+
+    if ($TestResult -eq $false) {
+        Write-Host "We're exiting as the correct license is not present for this standard."
+        return $true
+    } #we're done.
     $ExpirationDays = try { [int64]$Settings.ExpirationDays } catch { Write-Warning "Invalid ExpirationDays value provided: $($Settings.ExpirationDays)"; return }
     if (($ExpirationDays -ne -1) -and ($ExpirationDays -lt 1 -or $ExpirationDays -gt 99999)) {
         Write-LogMessage -API 'Standards' -tenant $Tenant -message "Invalid ExpirationDays value: $ExpirationDays. Must be -1 (Never Expire) or between 1 and 99999." -sev Error
@@ -73,9 +79,8 @@ function Invoke-CIPPStandardTeamsMeetingRecordingExpiration {
     if ($Settings.report -eq $true) {
         Add-CIPPBPAField -FieldName 'TeamsMeetingRecordingExpiration' -FieldValue $CurrentExpirationDays -StoreAs string -Tenant $Tenant
 
-        $CurrentExpirationDays = [PSCustomObject]@{
-            ExpirationDays = [string]$CurrentExpirationDays
-        }
+        $CurrentExpirationDays = if ($StateIsCorrect) { $true } else { $CurrentExpirationDays }
+
         Set-CIPPStandardsCompareField -FieldName 'standards.TeamsMeetingRecordingExpiration' -FieldValue $CurrentExpirationDays -Tenant $Tenant
     }
 }
