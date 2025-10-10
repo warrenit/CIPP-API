@@ -7,5 +7,9 @@ chocoapps.cache
 Cache_*
 Logs
 ExcludedTenants
-Config
 SendNotifications/config.json
+.env
+
+
+# Cursor IDE
+.cursor/rules
