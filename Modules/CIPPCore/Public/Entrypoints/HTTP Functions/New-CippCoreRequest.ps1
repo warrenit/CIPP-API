@@ -21,6 +21,9 @@ function New-CippCoreRequest {
     }
 
     if ($PSCmdlet.ShouldProcess("Processing request for $($Request.Params.CIPPEndpoint)")) {
+        # Set script scope variables for Graph API to indicate HTTP request/high priority
+        $script:XMsThrottlePriority = 'high'
+
         if ((Get-Command -Name $FunctionName -ErrorAction SilentlyContinue) -or $FunctionName -eq 'Invoke-Me') {
             try {
                 $Access = Test-CIPPAccess -Request $Request
@@ -47,10 +50,17 @@ function New-CippCoreRequest {
                         return ([HttpResponseContext]($HttpResponse | Select-Object -First 1))
                     } else {
                         # If no valid response context found, create a default success response
-                        return ([HttpResponseContext]@{
-                                StatusCode = [HttpStatusCode]::OK
-                                Body       = $Response
-                            })
+                        if ($Response.PSObject.Properties.Name -contains 'StatusCode' -and $Response.PSObject.Properties.Name -contains 'Body') {
+                            return ([HttpResponseContext]@{
+                                    StatusCode = $Response.StatusCode
+                                    Body       = $Response.Body
+                                })
+                        } else {
+                            return ([HttpResponseContext]@{
+                                    StatusCode = [HttpStatusCode]::OK
+                                    Body       = $Response
+                                })
+                        }
                     }
                 }
             } catch {
