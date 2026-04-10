@@ -8,7 +8,10 @@ function Invoke-CIPPDBTestsRun {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
-        [string]$TenantFilter = 'allTenants'
+        [string]$TenantFilter = 'allTenants',
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Force
     )
 
     Write-Information "Starting tests run for tenant: $TenantFilter"
@@ -19,6 +22,12 @@ function Invoke-CIPPDBTestsRun {
         Type         = 'CippTests'
         API          = 'CippTests'
     }
+
+    if ($Force) {
+        Write-Information 'Force flag set — clearing rerun protection'
+        Test-CIPPRerun @RerunParams -Clear | Out-Null
+    }
+
     $Rerun = Test-CIPPRerun @RerunParams
     if ($Rerun -eq $true) {
         Write-Host "rerun is true for $($TenantFilter)"
@@ -45,8 +54,7 @@ function Invoke-CIPPDBTestsRun {
             return
         }
 
-        # Build batch of per-tenant list activities
-        # Each activity will start its own orchestrator for that tenant's tests
+        # Phase 1: Build per-tenant list activities (discover tests per tenant)
         $Batch = foreach ($Tenant in $AllTenantsList) {
             @{
                 FunctionName = 'CIPPTestsList'
@@ -56,15 +64,17 @@ function Invoke-CIPPDBTestsRun {
 
         Write-Information "Built batch of $($Batch.Count) tenant test list activities"
 
-        # Start orchestrator to dispatch per-tenant test orchestrators
+        # Phase 2 via PostExecution: Aggregate all task lists and start flat execution orchestrator
         $InputObject = [PSCustomObject]@{
             OrchestratorName = 'TestsList'
             Batch            = @($Batch)
             SkipLog          = $true
+            PostExecution    = @{
+                FunctionName = 'CIPPTestsApplyBatch'
+            }
         }
 
-        Write-Information "InputObject: $($InputObject | ConvertTo-Json -Depth 5 -Compress)"
-        $InstanceId = Start-NewOrchestration -FunctionName 'CIPPOrchestrator' -InputObject ($InputObject | ConvertTo-Json -Depth 5 -Compress)
+        $InstanceId = Start-CIPPOrchestrator -InputObject $InputObject
         Write-Information "Started tests list orchestration with ID = '$InstanceId'"
 
         return @{

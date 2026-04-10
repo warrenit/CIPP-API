@@ -1,67 +1,52 @@
 function Push-CIPPTestsList {
     <#
+    .SYNOPSIS
+        Build the list of test suite activities for a single tenant (Phase 1)
+
+    .DESCRIPTION
+        Checks whether the tenant has cached data and returns one task per test suite.
+        Suite tasks are executed by Push-CIPPTestCollection, which discovers individual
+        test functions at runtime via Get-Command — no filesystem paths are used, so this
+        works correctly with ModuleBuilder compiled modules.
+
+        Reduces activity count from ~262 per tenant (one per test) to 6 per tenant
+        (one per suite), dramatically cutting orchestrator replay overhead.
+
     .FUNCTIONALITY
-    Entrypoint
+        Entrypoint
     #>
     param($Item)
 
     $TenantFilter = $Item.TenantFilter
 
     try {
-        Write-Information "Building test list for tenant: $TenantFilter"
+        Write-Information "Building test suite list for tenant: $TenantFilter"
 
-        # Get all test functions
-        $AllTests = Get-Command -Name 'Invoke-CippTest*' -Module CIPPCore | Select-Object -ExpandProperty Name | ForEach-Object {
-            $_ -replace '^Invoke-CippTest', ''
-        }
-
-        if ($AllTests.Count -eq 0) {
-            Write-Information 'No test functions found'
-            return @()
-        }
-
-        # Check if tenant has data
+        # Check if tenant has data before emitting any work
         $DbCounts = Get-CIPPDbItem -TenantFilter $TenantFilter -CountsOnly
         if (($DbCounts | Measure-Object -Property DataCount -Sum).Sum -eq 0) {
             Write-Information "Tenant $TenantFilter has no data in database. Skipping tests."
             return @()
         }
 
-        # Build test batch for this tenant
-        $TestBatch = foreach ($Test in $AllTests) {
+        # Emit one task per suite — suite names must match the ValidateSet in Invoke-CIPPTestCollection.
+        # Function discovery happens inside Invoke-CIPPTestCollection via Get-Command (path-independent).
+        $Suites = @('ZTNA', 'ORCA', 'EIDSCA', 'CISA', 'CopilotReadiness', 'GenericTests', 'Custom')
+
+        $Tasks = foreach ($Suite in $Suites) {
             [PSCustomObject]@{
-                FunctionName = 'CIPPTest'
+                FunctionName = 'CIPPTestCollection'
                 TenantFilter = $TenantFilter
-                TestId       = $Test
+                SuiteName    = $Suite
             }
         }
 
-        Write-Information "Built $($TestBatch.Count) test activities for tenant $TenantFilter"
-
-        # Start orchestrator for this tenant's tests
-        $InputObject = [PSCustomObject]@{
-            OrchestratorName = "TestsRun_$TenantFilter"
-            Batch            = @($TestBatch)
-            SkipLog          = $true
-        }
-
-        $InstanceId = Start-NewOrchestration -FunctionName 'CIPPOrchestrator' -InputObject ($InputObject | ConvertTo-Json -Depth 5 -Compress)
-        Write-Information "Started tests orchestrator for tenant $TenantFilter with ID = '$InstanceId'"
-
-        return @{
-            Success    = $true
-            Tenant     = $TenantFilter
-            InstanceId = $InstanceId
-            TestCount  = $TestBatch.Count
-        }
+        Write-Information "Built $($Tasks.Count) suite tasks for tenant $TenantFilter"
+        return @($Tasks)
 
     } catch {
         $ErrorMessage = Get-CippException -Exception $_
-        Write-LogMessage -API 'Tests' -tenant $TenantFilter -message "Failed to start tests for tenant: $($ErrorMessage.NormalizedError)" -sev Error -LogData $ErrorMessage
-        return @{
-            Success = $false
-            Tenant  = $TenantFilter
-            Error   = $ErrorMessage.NormalizedError
-        }
+        Write-LogMessage -API 'Tests' -tenant $TenantFilter -message "Failed to build test suite list: $($ErrorMessage.NormalizedError)" -sev Error -LogData $ErrorMessage
+        return @()
     }
 }
