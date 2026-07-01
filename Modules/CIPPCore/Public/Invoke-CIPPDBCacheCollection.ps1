@@ -87,6 +87,8 @@ function Invoke-CIPPDBCacheCollection {
             'ExoAdminAuditLogConfig'
             'ExoPresetSecurityPolicy'
             'ExoTenantAllowBlockList'
+            'ExoInboundConnector'
+            'ExoProtectionAlert'
             'OwaMailboxPolicy'
             'ReportSubmissionPolicy'
             'ExoTransportConfig'
@@ -122,6 +124,7 @@ function Invoke-CIPPDBCacheCollection {
             'IntuneScripts'
             'IntuneReusableSettings'
             'DetectedApps'
+            'IntuneAppInstallStatus'
             'MDEOnboarding'
         )
         Compliance         = @(
