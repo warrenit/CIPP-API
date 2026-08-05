@@ -58,6 +58,8 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
     #   Allow specific external -> AllowedDomains = @{ AllowList = @(list) }
     #   Block specific external -> AllowedDomains = @{ AllowList = @() } + BlockedDomains = @(list)
     $DomainControl = $Settings.DomainControl.value ?? $Settings.DomainControl
+    # An untoggled switch is absent from the settings; default it to $false so we never send null to the ConfigApi
+    $AllowTeamsConsumer = $Settings.AllowTeamsConsumer ?? $false
     $AllowedDomainsAsAList = @()
     $BlockedDomains = @()
     switch ($DomainControl) {
@@ -123,19 +125,21 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
             $BlockedDomainsMatches = $true
         }
         'AllowSpecificExternal' {
-            $AllowedDomainsMatches = -not (Compare-Object -ReferenceObject $AllowedDomainsAsAList -DifferenceObject $CurrentAllowedDomains)
+            # Both lists are already Sort-Object'd; compare as joined strings. Avoids Compare-Object,
+            # whose parameter binder coerces an empty array @() to $null and then throws.
+            $AllowedDomainsMatches = (@($AllowedDomainsAsAList) -join ',') -eq (@($CurrentAllowedDomains) -join ',')
             $BlockedDomainsMatches = (!$CurrentBlockedDomains -or @($CurrentBlockedDomains).Count -eq 0)
         }
         'BlockSpecificExternal' {
             # Allowed should be AllowAllKnownDomains, blocked domains already parsed above
             $AllowedDomainsMatches = $IsCurrentAllowAllKnownDomains
-            $BlockedDomainsMatches = -not (Compare-Object -ReferenceObject $BlockedDomains -DifferenceObject $CurrentBlockedDomains)
+            $BlockedDomainsMatches = (@($BlockedDomains) -join ',') -eq (@($CurrentBlockedDomains) -join ',')
         }
     }
 
     $ExpectedBlockedDomains = $BlockedDomains ?? @()
 
-    $StateIsCorrect = ($CurrentState.AllowTeamsConsumer -eq $Settings.AllowTeamsConsumer) -and
+    $StateIsCorrect = ($CurrentState.AllowTeamsConsumer -eq $AllowTeamsConsumer) -and
     ($CurrentState.AllowFederatedUsers -eq $AllowFederatedUsers) -and
     $AllowedDomainsMatches -and
     $BlockedDomainsMatches
@@ -146,7 +150,7 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
         } else {
             $cmdParams = @{
                 Identity            = 'Global'
-                AllowTeamsConsumer  = $Settings.AllowTeamsConsumer
+                AllowTeamsConsumer  = $AllowTeamsConsumer
                 AllowFederatedUsers = $AllowFederatedUsers
                 AllowedDomains      = $AllowedDomainsPayload
                 BlockedDomains      = @($BlockedDomains)
@@ -212,7 +216,7 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
             BlockedDomains      = $CurrentBlockedDomainsForReport
         }
         $ExpectedValue = @{
-            AllowTeamsConsumer  = $Settings.AllowTeamsConsumer
+            AllowTeamsConsumer  = $AllowTeamsConsumer
             AllowFederatedUsers = $AllowFederatedUsers
             AllowedDomains      = $ExpectedAllowedDomainsForReport
             BlockedDomains      = $ExpectedBlockedDomainsForReport

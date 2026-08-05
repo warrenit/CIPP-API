@@ -746,14 +746,16 @@ function Invoke-NinjaOneTenantSync {
 
 
         $UsersFilter = "PartitionKey eq '$($Customer.CustomerId)'"
-        [System.Collections.Generic.List[PSCustomObject]]$ParsedUsers = Get-CIPPAzDataTableEntity @UsersTable -Filter $UsersFilter
-        if (($ParsedUsers | Measure-Object).count -eq 0) {
-            [System.Collections.Generic.List[PSCustomObject]]$ParsedUsers = @()
-        }
 
-        [System.Collections.Generic.List[PSCustomObject]]$NinjaUserCache = Get-CIPPAzDataTableEntity @UsersUpdateTable -Filter $UsersFilter
-        if (($NinjaUserCache | Measure-Object).count -eq 0) {
-            [System.Collections.Generic.List[PSCustomObject]]$NinjaUserCache = @()
+        [System.Collections.Generic.List[PSCustomObject]]$StaleParsedUsers = Get-CIPPAzDataTableEntity @UsersTable -Filter $UsersFilter
+        if (($StaleParsedUsers | Measure-Object).count -gt 0) {
+            Remove-CIPPAzDataTableEntity -Force @UsersTable -Entity ($StaleParsedUsers | Select-Object PartitionKey, RowKey)
+        }
+        [System.Collections.Generic.List[PSCustomObject]]$ParsedUsers = @()
+
+        [System.Collections.Generic.List[PSCustomObject]]$StaleUserUpdates = Get-CIPPAzDataTableEntity @UsersUpdateTable -Filter $UsersFilter
+        if (($StaleUserUpdates | Measure-Object).count -gt 0) {
+            Remove-CIPPAzDataTableEntity -Force @UsersUpdateTable -Entity ($StaleUserUpdates | Select-Object PartitionKey, RowKey)
         }
 
         [System.Collections.Generic.List[PSCustomObject]]$UsersMap = Get-CIPPAzDataTableEntity @UsersMapTable -Filter $UsersFilter
@@ -761,15 +763,8 @@ function Invoke-NinjaOneTenantSync {
             [System.Collections.Generic.List[PSCustomObject]]$UsersMap = @()
         }
 
-        [System.Collections.Generic.List[PSCustomObject]]$NinjaUserUpdates = $NinjaUserCache | Where-Object { $_.action -eq 'Update' }
-        if (($NinjaUserUpdates | Measure-Object).count -eq 0) {
-            [System.Collections.Generic.List[PSCustomObject]]$NinjaUserUpdates = @()
-        }
-
-        [System.Collections.Generic.List[PSCustomObject]]$NinjaUserCreation = $NinjaUserCache | Where-Object { $_.action -eq 'Create' }
-        if (($NinjaUserCreation | Measure-Object).count -eq 0) {
-            [System.Collections.Generic.List[PSCustomObject]]$NinjaUserCreation = @()
-        }
+        [System.Collections.Generic.List[PSCustomObject]]$NinjaUserUpdates = @()
+        [System.Collections.Generic.List[PSCustomObject]]$NinjaUserCreation = @()
 
 
         foreach ($user in $SyncUsers | Where-Object { $_.id -notin $ParsedUsers.RowKey }) {
@@ -1215,11 +1210,12 @@ function Invoke-NinjaOneTenantSync {
                         if (($NinjaUserCreation | Measure-Object).count -ge 100) {
                             Write-Information 'Creating NinjaOne Users'
                             [System.Collections.Generic.List[PSCustomObject]]$CreatedUsers = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method POST -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ("[$($NinjaUserCreation.body -join ',')]") -EA Stop).content | ConvertFrom-Json -Depth 100
-                            Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserCreation
+                            Remove-CIPPAzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserCreation
                             [System.Collections.Generic.List[PSCustomObject]]$NinjaUserCreation = @()
                         }
                     } catch {
-                        Write-Information "Bulk Creation Error, but may have been successful as only 1 record with an issue could have been the cause: $_"
+                        $ErrorMessage = Get-CippException -Exception $_
+                        Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "NinjaOne user document creation failed for $($Customer.displayName). NinjaOne rejects the whole batch if any single document is invalid, so all $(($NinjaUserCreation | Measure-Object).count) user(s) in this batch were not written: $($ErrorMessage.NormalizedError)" -Sev 'Error' -LogData $ErrorMessage
                     }
 
                     try {
@@ -1227,11 +1223,12 @@ function Invoke-NinjaOneTenantSync {
                         if (($NinjaUserUpdates | Measure-Object).count -ge 100) {
                             Write-Information 'Updating NinjaOne Users'
                             [System.Collections.Generic.List[PSCustomObject]]$UpdatedUsers = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method PATCH -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ("[$($NinjaUserUpdates.body -join ',')]") -EA Stop).content | ConvertFrom-Json -Depth 100
-                            Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserUpdates
+                            Remove-CIPPAzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserUpdates
                             [System.Collections.Generic.List[PSCustomObject]]$NinjaUserUpdates = @()
                         }
                     } catch {
-                        Write-Information "Bulk Update Errored, but may have been successful as only 1 record with an issue could have been the cause: $_"
+                        $ErrorMessage = Get-CippException -Exception $_
+                        Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "NinjaOne user document update failed for $($Customer.displayName). NinjaOne rejects the whole batch if any single document is invalid, so all $(($NinjaUserUpdates | Measure-Object).count) user(s) in this batch were not written: $($ErrorMessage.NormalizedError)" -Sev 'Error' -LogData $ErrorMessage
                     }
 
 
@@ -1290,11 +1287,12 @@ function Invoke-NinjaOneTenantSync {
                 if (($NinjaUserCreation | Measure-Object).count -ge 1) {
                     Write-Information 'Creating NinjaOne Users'
                     [System.Collections.Generic.List[PSCustomObject]]$CreatedUsers = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method POST -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ("[$($NinjaUserCreation.body -join ',')]") -EA Stop).content | ConvertFrom-Json -Depth 100
-                    Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserCreation
+                    Remove-CIPPAzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserCreation
 
                 }
             } catch {
-                Write-Information "Bulk Creation Error, but may have been successful as only 1 record with an issue could have been the cause: $_"
+                $ErrorMessage = Get-CippException -Exception $_
+                Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "NinjaOne user document creation failed for $($Customer.displayName). NinjaOne rejects the whole batch if any single document is invalid, so all $(($NinjaUserCreation | Measure-Object).count) user(s) in this batch were not written: $($ErrorMessage.NormalizedError)" -Sev 'Error' -LogData $ErrorMessage
             }
 
             try {
@@ -1302,10 +1300,11 @@ function Invoke-NinjaOneTenantSync {
                 if (($NinjaUserUpdates | Measure-Object).count -ge 1) {
                     Write-Information 'Updating NinjaOne Users'
                     [System.Collections.Generic.List[PSCustomObject]]$UpdatedUsers = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method PATCH -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ("[$($NinjaUserUpdates.body -join ',')]") -EA Stop).content | ConvertFrom-Json -Depth 100
-                    Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserUpdates
+                    Remove-CIPPAzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserUpdates
                 }
             } catch {
-                Write-Information "Bulk Update Errored, but may have been successful as only 1 record with an issue could have been the cause: $_"
+                $ErrorMessage = Get-CippException -Exception $_
+                Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "NinjaOne user document update failed for $($Customer.displayName). NinjaOne rejects the whole batch if any single document is invalid, so all $(($NinjaUserUpdates | Measure-Object).count) user(s) in this batch were not written: $($ErrorMessage.NormalizedError)" -Sev 'Error' -LogData $ErrorMessage
             }
 
             ### Relationship Mapping
@@ -1483,7 +1482,8 @@ function Invoke-NinjaOneTenantSync {
                     [System.Collections.Generic.List[PSCustomObject]]$CreatedLicenses = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method POST -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ($NinjaLicenseCreation | ConvertTo-Json -Depth 100 -AsArray) -EA Stop).content | ConvertFrom-Json -Depth 100
                 }
             } catch {
-                Write-Information "Bulk Creation Error, but may have been successful as only 1 record with an issue could have been the cause: $_"
+                $ErrorMessage = Get-CippException -Exception $_
+                Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "NinjaOne license document creation failed for $($Customer.displayName). NinjaOne rejects the whole batch if any single document is invalid, so all $(($NinjaLicenseCreation | Measure-Object).count) license(s) in this batch were not written: $($ErrorMessage.NormalizedError)" -Sev 'Error' -LogData $ErrorMessage
             }
 
             try {
@@ -1494,7 +1494,8 @@ function Invoke-NinjaOneTenantSync {
                     Write-Information 'Completed Update'
                 }
             } catch {
-                Write-Information "Bulk Update Errored, but may have been successful as only 1 record with an issue could have been the cause: $_"
+                $ErrorMessage = Get-CippException -Exception $_
+                Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "NinjaOne license document update failed for $($Customer.displayName). NinjaOne rejects the whole batch if any single document is invalid, so all $(($NinjaLicenseUpdates | Measure-Object).count) license(s) in this batch were not written: $($ErrorMessage.NormalizedError)" -Sev 'Error' -LogData $ErrorMessage
             }
 
             [System.Collections.Generic.List[PSCustomObject]]$LicenseDocs = $CreatedLicenses + $UpdatedLicenses
@@ -1551,6 +1552,16 @@ function Invoke-NinjaOneTenantSync {
 
         ### M365 Links Section
         if ($MappedFields.TenantLinks) {
+            try {
+                $SharePointAdminUrl = (Get-SharePointAdminLink -TenantFilter $TenantFilter).AdminUrl
+            } catch {
+                $SharePointTenantName = ($Customer.initialDomainName -split '\.')[0]
+                if ($SharePointTenantName) {
+                    Write-Information "NinjaOneSync: Get-SharePointAdminLink failed for $($Customer.defaultDomainName), using fallback SharePoint admin URL '$SharePointAdminUrl'. Error: $($_.Exception.Message)"
+                    $SharePointAdminUrl = "https://$SharePointTenantName-admin.sharepoint.com"
+                }
+            }
+
             $ManagementLinksData = @(
                 @{
                     Name = 'M365 Admin Portal'
@@ -1574,7 +1585,7 @@ function Invoke-NinjaOneTenantSync {
                 },
                 @{
                     Name = 'SharePoint Admin'
-                    Link = "https://admin.microsoft.com/Partner/beginclientsession.aspx?CTID=$($Customer.customerId)&CSDEST=SharePoint"
+                    Link = $SharePointAdminUrl ?? "https://$($Customer.defaultDomainName)-admin.sharepoint.com"
                     Icon = 'fas fa-shapes'
                 },
                 @{
@@ -2240,7 +2251,7 @@ function Invoke-NinjaOneTenantSync {
                             Write-LogMessage -API 'NinjaOneSync' -tenant $TenantFilter -message "CVE sync — skipped $SkippedCount rows (missing deviceName or cveId)" -sev 'Warning'
                         }
                     }
-                    $CsvBytes = New-VulnCsvBytes -TenantFilter $TenantFilter -Rows $CsvRows -Headers @($DeviceIdHeader, $CveIdHeader)
+                    $CsvBytes = New-VulnCsvBytes -Rows $CsvRows -Headers @($DeviceIdHeader, $CveIdHeader)
 
                     if ($CsvBytes -and $CsvBytes.Length -gt 0) {
                         $UploadUri = "$NinjaBaseUrl/vulnerability/scan-groups/$ResolvedScanGroupId/upload"
@@ -2270,12 +2281,12 @@ function Invoke-NinjaOneTenantSync {
 
         Write-Information 'Cleaning Users Cache'
         if (($ParsedUsers | Measure-Object).count -gt 0) {
-            Remove-AzDataTableEntity -Force @UsersTable -Entity ($ParsedUsers | Select-Object PartitionKey, RowKey)
+            Remove-CIPPAzDataTableEntity -Force @UsersTable -Entity ($ParsedUsers | Select-Object PartitionKey, RowKey)
         }
 
         Write-Information 'Cleaning Device Cache'
         if (($ParsedDevices | Measure-Object).count -gt 0) {
-            Remove-AzDataTableEntity -Force @DeviceTable -Entity ($ParsedDevices | Select-Object PartitionKey, RowKey)
+            Remove-CIPPAzDataTableEntity -Force @DeviceTable -Entity ($ParsedDevices | Select-Object PartitionKey, RowKey)
         }
 
         Write-Information "Total Fetch Time: $((New-TimeSpan -Start $StartTime -End $FetchEnd).TotalSeconds)"
