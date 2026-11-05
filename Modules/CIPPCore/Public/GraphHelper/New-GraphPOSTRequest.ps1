@@ -40,7 +40,7 @@ function New-GraphPOSTRequest {
         $body = Get-CIPPTextReplacement -TenantFilter $tenantid -Text $body -EscapeForJson
 
         if (!$headers['User-Agent']) {
-            $headers['User-Agent'] = Get-CippUserAgent
+            $headers['User-Agent'] = Get-CippUserAgent -SharePoint:($uri -match '^https://[^/]+\.sharepoint(-[a-z]+)?\.')
         }
 
         if (!$contentType) {
@@ -66,11 +66,13 @@ function New-GraphPOSTRequest {
                     $_.Exception.message
                 }
 
+                # A network failure has no response to read Retry-After from, and the header may be a date, not seconds
+                $RetryAfter = if ($_.Exception.Response) { $_.Exception.Response.Headers['Retry-After'] -as [int] }
+
                 # Check for 429 Too Many Requests
                 if ($_.Exception.Response.StatusCode -eq 429) {
-                    $RetryAfterHeader = $_.Exception.Response.Headers['Retry-After']
-                    if ($RetryAfterHeader) {
-                        $WaitTime = [int]$RetryAfterHeader
+                    if ($RetryAfter) {
+                        $WaitTime = $RetryAfter
                         $RetryReason = 'Rate limited (429).'
                     } else {
                         $WaitTime = Get-Random -Minimum 1.1 -Maximum 4.1
@@ -78,10 +80,10 @@ function New-GraphPOSTRequest {
                     }
                     $ShouldRetry = $true
                 }
-                # Check for "Resource temporarily unavailable" / SharePoint CSOM throttling
+                # 503 (SharePoint's internal busy signal) and "Resource temporarily unavailable" / SharePoint CSOM throttling
                 # ("Server busy, please retry" is transient and safe to retry, e.g. ListSiteProperties).
-                elseif ($Message -like '*Resource temporarily unavailable*' -or $Message -like '*Too many requests*' -or $Message -like '*Server busy*') {
-                    $WaitTime = Get-Random -Minimum 1.1 -Maximum 3.1
+                elseif ($_.Exception.Response.StatusCode -eq 503 -or $Message -like '*Resource temporarily unavailable*' -or $Message -like '*Too many requests*' -or $Message -like '*Server busy*') {
+                    $WaitTime = $RetryAfter ? $RetryAfter : (Get-Random -Minimum 1.1 -Maximum 3.1)
                     $RetryReason = 'Resource temporarily unavailable.'
                     $ShouldRetry = $true
                 }
